@@ -41,9 +41,9 @@ class Arweave(Logger):
         for block, tx, header, stream, ditemid, mark, length in cls.__iter_ditems(start, end):
             stream.seek(mark)
             diheader = ar.ANS104DataItemHeader.fromstream(stream)
-            if diheader.owner == raw_owner:
+            if diheader.raw_owner == raw_owner:
                 tags = ar.utils.tags_to_dict(diheader.tags)
-                if tags['Content-Type'] == 'application/x.arweave-manifest+json':
+                if tags.get(b'Content-Type') == b'application/x.arweave-manifest+json':
                     yield cls.__locator(
                         diheader.id,
                         block.height - 16,
@@ -65,10 +65,10 @@ class Arweave(Logger):
     def __ditem(cls, data, content_type = None, **tags):
         # convert data into a signed dataitem object
         if content_type is not None:
-            tags['Content-Type'] = content_type
+            tags[b'Content-Type'] = content_type
         if type(data) in (dict, list):
             data = json.dumps(data)
-            tags.setdefault('Content-Type', 'application/json')
+            tags.setdefault(b'Content-Type', b'application/json')
         data = ar.DataItem(data = data.encode())
         data.header.tags = [ar.utils.create_tag(k, v, True) for k, v in tags.items()]
         data.sign(wallet.rsa)
@@ -113,7 +113,7 @@ class Arweave(Logger):
 
     @classmethod
     def __iter_ditems(cls, start = None, end = None, reverse = False):
-        first_height = 1142520
+        first_height = 1142523
         first_time = 1679419828
         if start is not None:
             start = dateutil.parser.parse(start).timestamp()
@@ -173,6 +173,7 @@ class Arweave(Logger):
         mark += headerlen
         length -= headerlen
         def get():
+            nonlocal minheight, minhash
             data = dict(input=None,output=None,metadata=None)
             stream.seek(mark)
             manifest = json.loads(stream.read(length))
@@ -187,14 +188,14 @@ class Arweave(Logger):
                 if ditemlen is not None:
                     data[key] = cls.__ditemdata(stream, header.get_offset(ditemid), ditemlen)
                 else:
-                    for block, tx, header, stream, ditemid, mark, length in cls.__iter_ditems(end=block.timestamp+60*5, reverse=True):
-                        path = paths_by_id.get(ditemid)
+                    for block2, tx2, header2, stream2, ditemid2, mark2, length2 in cls.__iter_ditems(end=block.timestamp+60*5, reverse=True):
+                        path = paths_by_id.get(ditemid2)
                         if path is None:
                             continue
-                        if block.height < minheight:
-                            minheight = block.height
-                            minhash = block.indep_hash
-                        data[path] = cls.__ditemdata(stream, mark, length)
+                        if block2.height < minheight:
+                            minheight = block2.height
+                            minhash = block2.indep_hash
+                        data[path] = cls.__ditemdata(stream2, mark2, length2)
                         if not any([val is None for val in data.values()]):
                             break
             if type(data['metadata']) is dict:
@@ -206,8 +207,8 @@ class Arweave(Logger):
     @classmethod
     def __ditemdata(cls, stream, offset, length):
         stream.seek(offset)
-        ditem = ar.ANS104DataItem.fromstream(stream, length)
-        if ar.utils.tags_to_dict(ditem.header.tags)['Content-Type'] == 'application/json':
+        ditem = ar.DataItem.fromstream(stream, length)
+        if ar.utils.tags_to_dict(ditem.header.tags).get(b'Content-Type') == b'application/json':
             return json.loads(ditem.data)
         else:
             return ditem.data
@@ -243,6 +244,7 @@ DEFAULT_WALLET_JWK = {
 Arweave.wallet = ar.Wallet.from_data(DEFAULT_WALLET_JWK)
 
 if __name__ == '__main__':
-    for log in Arweave._iter_logs():
+    for locator, getter in Arweave._iter_logs():
+        log = getter()
         log.pop('output')
         print(log)
