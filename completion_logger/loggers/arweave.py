@@ -1,5 +1,6 @@
 import ar, ar.utils
 import bundlr
+import dateutil
 
 import json
 import threading
@@ -32,10 +33,33 @@ class Arweave(Logger):
     
         # return the url to the folder on the gateway
         # include information in the url on finding the data
+        return cls.__locator(ditemid, cls.current_block['height'], cls.current_block['indep_hash'])
+
+    @classmethod
+    def _iter_logs(cls, start = None, end = None):
+        raw_owner = cls.wallet.raw_owner
+        for block, tx, header, stream, ditemid, mark, length in cls.__iter_ditems(start, end):
+            stream.seek(mark)
+            diheader = ar.ANS104DataItemHeader.fromstream(stream)
+            if diheader.owner == raw_owner:
+                tags = ar.utils.tags_to_dict(diheader.tags)
+                if tags['Content-Type'] == 'application/x.arweave-manifest+json':
+                    yield cls.__locator(
+                        diheader.id,
+                        block.height - 16,
+                        block.indep_hash,
+                    ), cls.__getter(
+                        block, header, stream, mark, length, diheader
+                    )
+
+    @classmethod
+    def __locator(cls, ditemid, height, hash):
+        # return the url to the folder on the gateway
+        # include information in the url on finding the data
         urlpart = (f'{ditemid}' +
-                   f'#minblockheight={current_block["height"]}' +
-                   f'&minblockhash={current_block["indep_hash"]}')
-        return urllib.parse.urljoin(gateway, urlpart)
+                   f'#minblockheight={height}' +
+                   f'&minblockhash={hash}')
+        return urllib.parse.urljoin(cls.gateway, urlpart)
     
     @classmethod 
     def __ditem(cls, data, content_type = None, **tags):
@@ -85,7 +109,125 @@ class Arweave(Logger):
         result = bundlr_node.send_tx(ditem.tobytes())
         assert result['id'] == ditem.header.id
 
+    # could use function caching approach if moved fetching and indexing parts to functions
+
+    @classmethod
+    def __iter_ditems(cls, start = None, end = None, reverse = False):
+        first_height = 1142520
+        first_time = 1679419828
+        if start is not None:
+            start = dateutil.parser.parse(start).timestamp()
+        if end is not None:
+            end = dateutil.parser.parse(end).timestamp()
+        heights = [
+            first_height,
+            None,
+            cls.current_block['height']
+        ]
+        times = [
+            first_time,
+            None,
+            cls.current_block['timestamp']
+        ]
+        if reverse:
+            if end is None:
+                height, time = heights[-1], times[-1]
+            else:
+                height, time = cls.__bisect_block(end, heights, times)
+        else:
+            if start is None:
+                height, time = heights[0], times[0]
+            else:
+                height, time = cls.__bisect_block(start, heights, times)
+        if start is None:
+            start = first_time
+        #REQ_ALL_CACHED_TXS = b'\xff' * 125
+        while True:
+            block = ar.Block.frombytes(cls.peer.block2_height(height))#, REQ_ALL_CACHED_TXS))
+            cls.block = block
+            for tx in block.txs:
+                if type(tx) is str:
+                    tx = ar.Transaction.frombytes(cls.peer.tx2(tx))
+                if b'Bundle-Format' in ar.utils.tags_to_dict(tx.tags):
+                    stream = cls.peer.stream(tx.id)
+                    header = ar.ANS104BundleHeader.from_tags_stream(tx.tags, stream)
+                    mark = stream.tell()
+                    assert mark == header.get_len_bytes()
+                    for length, ditemid in header.length_id_pairs:
+                        yield block, tx, header, stream, ditemid, mark, length
+                        mark += length
+            if reverse:
+                if block.timestamp <= start:
+                    break
+                height -= 1
+            else:
+                if end is not None and block.timestamp >= end:
+                    break
+                height += 1
+
+    @classmethod
+    def __getter(cls, block, header, stream, mark, length, diheader):
+        minheight = block.height
+        minhash = block.indep_hash
+        headerlen = diheader.get_len_bytes()
+        mark += headerlen
+        length -= headerlen
+        def get():
+            data = dict(input=None,output=None,metadata=None)
+            stream.seek(mark)
+            manifest = json.loads(stream.read(length))
+            # manifest entries in data
+            paths = manifest['paths']
+            paths_by_id = {data['id']: name for name, data in paths.items() if name in data}
+            for key in data:
+                if data[key] is not None:
+                    break
+                ditemid = paths[key]['id']
+                ditemlen = header.length_by_id.get(ditemid)
+                if ditemlen is not None:
+                    data[key] = cls.__ditemdata(stream, header.get_offset(ditemid), ditemlen)
+                else:
+                    for block, tx, header, stream, ditemid, mark, length in cls.__iter_ditems(end=block.timestamp+60*5, reverse=True):
+                        path = paths_by_id.get(ditemid)
+                        if path is None:
+                            continue
+                        if block.height < minheight:
+                            minheight = block.height
+                            minhash = block.indep_hash
+                        data[path] = cls.__ditemdata(stream, mark, length)
+                        if not any([val is None for val in data.values()]):
+                            break
+            if type(data['metadata']) is dict:
+                data.update(data.pop('metadata'))
+            data['locator'] = cls.__locator(diheader.id, minheight, minhash)
+            return data
+        return get
+
+    @classmethod
+    def __ditemdata(cls, stream, offset, length):
+        stream.seek(offset)
+        ditem = ar.ANS104DataItem.fromstream(stream, length)
+        if ar.utils.tags_to_dict(ditem.header.tags)['Content-Type'] == 'application/json':
+            return json.loads(ditem.data)
+        else:
+            return ditem.data
+
+    @classmethod
+    def __bisect_block(cls, time, heights, times):
+        while True:
+            if time <= times[0] or heights[0] + 1 >= heights[-1]:
+                return heights[0], times[0]
+            elif time >= times[-1]:
+                return heights[-1], times[-1]
+            heights[1] = (heights[-1] - heights[0] - 2) * (time - times[0]) // (times[-1] - times[0]) + heights[0] + 1
+            times[1] = cls.peer.block_height(heights[1], 'timestamp')
+            if times[1] >= time:
+                heights[-1], times[-1] = heights[1], times[1]
+            else:
+                heights[0], times[0] = heights[1], times[1]
+
 DEFAULT_WALLET_JWK = {
+        # address: CfwZrIUuuClNT_ZhxmhqkwPD3IasLCILv8ZD3wcgwqY
         'alg': 'RS256',
         'kty': 'RSA',
         'n': '4FtI5e6UCJcT1f58HKGihz988DzoO2n3lyk1NzX86wRpDAiwQGEWDI_mZXK9sHA4o6n8f80yzKXOaSX0tx6hybw1NgrlrUoaQ-3DwDtoCERG12gNttN4w9EU-LJL092tqVAyPvGhjj_I_L1-_IqpBMoOS2d600si-TDWDolJKi93VBmDCsRVLgmGeLPe7cjIDrrDLNesbP2HE3Zhdup4UWv7HP_8tvctOwCDUtf6n4QJBmx8_tmhXWO-4Y2Tuu-6Ujg9aTNTNiaFqIPzh0FzMhryA9V6-DjDjJa-A1KMnInjoV0KD-e-SBOwIxulQi7InaAIyyKNZ8iytkqk69VTQlHMAaTC2IgwcFFvm-Uag2dgM9Y_2RmUgbxWmqMpglB33atrHfixCY3iXsLRjYcC6zPXPEWvrCdRW6xxWojS7vH8YWhkmzzaMBsfORvO0pRlB0CvC0qYON_I3wiEW2YAAmq9GAXPV3SL1ZiebPwG1BKUa3NHdW9U-Dm4W1VLqp3IiCumZAqp7CWDZTRbm7XmTqAHb2HAbkdzFZ9Bee09N1VqBvxRESCETVx1W7SMUgPE2uKiinWNRqIiCzUJfqA5Rl9pnqLpNr21F7IDNpVF-P4X3u0UfZpaJjzB6Ma7zLmN1f-DBl0L1B1QTC97vbZNCAm9ayAZf3dx4mOMfZOFEBc',
@@ -99,3 +241,8 @@ DEFAULT_WALLET_JWK = {
         'p2s': ''
 }
 Arweave.wallet = ar.Wallet.from_data(DEFAULT_WALLET_JWK)
+
+if __name__ == '__main__':
+    for log in Arweave._iter_logs():
+        log.pop('output')
+        print(log)
