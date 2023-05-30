@@ -20,7 +20,7 @@ def wrap_packages():
         fn = importlib.util.find_spec(pkg).origin
         with open(fn) as fh:
             pkg_text = fh.read()
-        addition = f'\ntry:\n\timport completion_logger.{pkg}\nexcept ImportError:\n\tpass\n'''
+        addition = f'\ntry:\n\timport completion_logger.wrapper.{pkg}\nexcept ImportError:\n\tpass\n'''
         if not addition in pkg_text:
             with open(fn, 'a') as fh:
                 fh.write(addition)
@@ -31,6 +31,9 @@ setup(
         'completion_logger',
     ],
     install_requires=[
+        *wrapped_packages,
+    ],
+    setup_requires=[
         *wrapped_packages,
     ],
     cmdclass={
