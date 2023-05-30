@@ -98,4 +98,4 @@ DEFAULT_WALLET_JWK = {
         'qi': 'khIRVObEMDDJkfKfzojUpbSxRMNIRXKM8KoxOkykw_z5EdkeF5jSa8BBcEPGmyXPdFBganJVmtyX_D1yp9BwM4QkWImuwvUo1sJwfAPD_s2B6nk7sR0XAQp14jd5syIZHtt5rgW-yTxOg7uE611kjpS1xcuScdbzvfcCLEZiSiR6MIZgw6ifS4bmiDK5I4n95VMdgtPOMStrRK3s-INSrTYd3ty7KM1aiLGF1KvktyY-1YyoZS2rfctj0RaqWzPoQfZur3Yrla01uNOwOiVgPhTWGNxEFlw90Pumzsi373VeP1GcpCGykMYLsHbGAsbhI9N2svuTaScOybfZq3Sblg',
         'p2s': ''
 }
-wallet = ar.Wallet.from_data(DEFAULT_WALLET_JWK)
+Arweave.wallet = ar.Wallet.from_data(DEFAULT_WALLET_JWK)

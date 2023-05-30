@@ -31,6 +31,7 @@ setup(
         'completion_logger',
     ],
     install_requires=[
+        'pyarweave',
         *wrapped_packages,
     ],
     setup_requires=[
