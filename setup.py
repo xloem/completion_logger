@@ -31,8 +31,9 @@ setup(
         'completion_logger',
     ],
     install_requires=[
-        'git+https://github.com/xloem/pyarweave',
+        'pyarweave @ git+https://github.com/xloem/pyarweave',
         'python-dateutil',
+        'diskcache',
         *wrapped_packages,
     ],
     setup_requires=[
