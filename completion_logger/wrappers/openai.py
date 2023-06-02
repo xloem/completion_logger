@@ -17,7 +17,7 @@ def wrap(cls):
         ),
         input = metadata.pop(input_key)
         return Log(input, metadata, initial=[], processor=openai.openai_object.OpenAIObject.to_dict_recursive)
-    def add_response(log, response)
+    def add_response(log, response):
         if type(response) is types.GeneratorType:
             return log.stream(response)
         elif type(response) is types.AsyncGeneratorType:
@@ -37,6 +37,6 @@ def wrap(cls):
     cls.create = create
     cls.acreate = create
 
-for name, value in openai.__dict__:
+for name, value in openai.__dict__.items():
     if hasattr(value, 'create') and hasattr(value, 'acreate'):
         wrap(value)
