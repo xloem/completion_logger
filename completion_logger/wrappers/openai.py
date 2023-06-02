@@ -2,11 +2,11 @@ import openai
 from completion_logger import Log
 import types
 
-def wrap(cls):
+def wrap(cls, input_keys):
     __create = cls.create
     __acreate = cls.acreate
     
-    def create_log(input_key, api_key=None, api_base=None, api_type=None, request_id=None, api_version=None, organization=None, **params):
+    def create_log(api_key=None, api_base=None, api_type=None, request_id=None, api_version=None, organization=None, **params):
         metadata = dict(
             api_base = api_base or openai.api_base,
             api_type = api_type or openai.api_type,
@@ -14,8 +14,14 @@ def wrap(cls):
             api_version = api_version or openai.api_version,
             organization = bool(organization or openai.organization),
             **params
-        ),
-        input = metadata.pop(input_key)
+        )
+        if len(input_keys) == 1:
+            input = metadata.pop(input_keys[0], None)
+        else:
+            input = {
+                input_key: metadata.pop(input_key, None)
+                for input_key in input_keys
+            }
         return Log(input, metadata, initial=[], processor=openai.openai_object.OpenAIObject.to_dict_recursive)
     def add_response(log, response):
         if type(response) is types.GeneratorType:
@@ -38,5 +44,17 @@ def wrap(cls):
     cls.acreate = create
 
 for name, value in openai.__dict__.items():
-    if hasattr(value, 'create') and hasattr(value, 'acreate'):
-        wrap(value)
+    input_keys = {
+        'completions': ['prompt'],
+        'chat.completions': ['messages'],
+        'edits': ['input', 'instruction'],
+        'images.generations': ['prompt'],
+        'images.edits': ['image'],
+        'images.variations': ['image'],
+        'embeddings': ['input'],
+        'audio.transcriptions': ['file'],
+        'audio.translations': ['file'],
+        'moderations': ['input'],
+    }.get(getattr(value, 'OBJECT_NAME', None))
+    if input_keys is not None and hasattr(value, 'create') and hasattr(value, 'acreate'):
+        wrap(value, input_keys)
