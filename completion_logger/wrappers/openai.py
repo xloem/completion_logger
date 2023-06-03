@@ -33,15 +33,15 @@ def wrap(cls, input_keys):
 
     def create(*params, **kwparams):
         with create_log(*params, **kwparams) as log:
-            response == __create(*params, **kwparams)
+            response = __create(*params, **kwparams)
             return add_response(log, response)
     async def acreate(*params, **kwparams):
         with create_log(*params, **kwparams) as log:
-            response == await __acreate(*params, **kwparams)
+            response = await __acreate(*params, **kwparams)
             return add_response(log, response)
 
     cls.create = create
-    cls.acreate = create
+    cls.acreate = acreate
 
 for name, value in openai.__dict__.items():
     input_keys = {

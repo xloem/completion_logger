@@ -29,8 +29,8 @@ class Log:
                 self.add(token)
                 yield token
     def add(self, output):
-        output = self.processor(output)
-        self.output += output
+        processed_output = self.processor(output)
+        self.output += processed_output
         return output
 
     @staticmethod
@@ -44,11 +44,13 @@ class Log:
         return self
     def __exit__(self, *exc):
         if self.logger is not None:
-            locator = self.logger._log_completion(self.input, self.output, self.metadata)
-            logger.info(f'Logged {locator}')
+            if self.output != self.initial:
+                locator = self.logger._log_completion(self.input, self.output, self.metadata)
+                logger.info(f'Logged {locator}')
         del self.output
     async def __aexit__(self, *exc):
         if self.logger is not None:
-            locator = await self.logger._alog_completion(self.input, self.output, self.metadata)
-            logger.info(f'Logged {locator}')
+            if self.output != self.initial:
+                locator = await self.logger._alog_completion(self.input, self.output, self.metadata)
+                logger.info(f'Logged {locator}')
         del self.output

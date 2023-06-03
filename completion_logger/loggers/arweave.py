@@ -2,8 +2,11 @@ import ar, ar.utils
 import bundlr
 import dateutil
 
+import diskcache
 import json
+from time import time as now
 import threading
+import tqdm
 import urllib
 
 from .logger import Logger
@@ -71,7 +74,7 @@ class Arweave(Logger):
             tags.setdefault(b'Content-Type', b'application/json')
         data = ar.DataItem(data = data.encode())
         data.header.tags = [ar.utils.create_tag(k, v, True) for k, v in tags.items()]
-        data.sign(wallet.rsa)
+        data.sign(cls.wallet.rsa)
         return data
     
     @classmethod 
@@ -113,8 +116,10 @@ class Arweave(Logger):
 
     @classmethod
     def __iter_ditems(cls, start = None, end = None, reverse = False):
+        node_addr = cls.bundlr_node.info()['addresses']['arweave']
         first_height = 1142523
         first_time = 1679419828
+        timeout = now() + 60*2#20
         if start is not None:
             start = dateutil.parser.parse(start).timestamp()
         if end is not None:
@@ -134,21 +139,31 @@ class Arweave(Logger):
                 height, time = heights[-1], times[-1]
             else:
                 height, time = cls.__bisect_block(end, heights, times)
+                heights[-1] = height
+            #pbar = tqdm.tqdm(total = (time - start) / 3600, unit = 'h')
+            pbar = tqdm.tqdm(start = height, total = heights[0])
         else:
             if start is None:
                 height, time = heights[0], times[0]
+                start = first_time
             else:
                 height, time = cls.__bisect_block(start, heights, times)
-        if start is None:
-            start = first_time
+                heights[0] = height
+            #pbar = tqdm.tqdm(total = ((end or times[-1]) - time) / 3600, unit = 'h')
+            pbar = tqdm.tqdm(initial = heights[0], total = heights[-1])
         #REQ_ALL_CACHED_TXS = b'\xff' * 125
-        while True:
-            block = ar.Block.frombytes(cls.peer.block2_height(height))#, REQ_ALL_CACHED_TXS))
+        with pbar as pbar, diskcache.Cache() as cache:
+          block2_height = cache.memoize()(cls.peer.block2_height)
+          tx2 = cache.memoize()(cls.peer.tx2)
+          while True:
+            if now() > timeout:
+                break
+            block = ar.Block.frombytes(block2_height(height))#, REQ_ALL_CACHED_TXS))
             cls.block = block
             for tx in block.txs:
                 if type(tx) is str:
-                    tx = ar.Transaction.frombytes(cls.peer.tx2(tx))
-                if b'Bundle-Format' in ar.utils.tags_to_dict(tx.tags):
+                    tx = ar.Transaction.frombytes(tx2(tx))
+                if b'Bundle-Format' in ar.utils.tags_to_dict(tx.tags) and tx.wallet.address == node_addr:
                     stream = cls.peer.stream(tx.id)
                     header = ar.ANS104BundleHeader.from_tags_stream(tx.tags, stream)
                     mark = stream.tell()
@@ -156,14 +171,20 @@ class Arweave(Logger):
                     for length, ditemid in header.length_id_pairs:
                         yield block, tx, header, stream, ditemid, mark, length
                         mark += length
+                    break # assuming only 1 bundle/block
             if reverse:
                 if block.timestamp <= start:
                     break
+                #pbar.update((time - block.timestamp)/3600)
+                time = block.timestamp
                 height -= 1
             else:
                 if end is not None and block.timestamp >= end:
                     break
+                #pbar.update((block.timestamp - time)/3600)
+                time = block.timestamp
                 height += 1
+            pbar.update(1)
 
     @classmethod
     def __getter(cls, block, header, stream, mark, length, diheader):
@@ -244,6 +265,8 @@ DEFAULT_WALLET_JWK = {
 Arweave.wallet = ar.Wallet.from_data(DEFAULT_WALLET_JWK)
 
 if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO)
     for locator, getter in Arweave._iter_logs():
         log = getter()
         log.pop('output')
