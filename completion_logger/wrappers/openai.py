@@ -22,21 +22,27 @@ def wrap(cls, input_keys):
                 input_key: metadata.pop(input_key, None)
                 for input_key in input_keys
             }
-        return Log(input, metadata, initial=[], processor=openai.openai_object.OpenAIObject.to_dict_recursive)
+        return Log(
+            input,
+            metadata,
+            processor=openai.openai_object.OpenAIObject.to_dict_recursive,
+            stream_constructor=list,
+            stream_processor=lambda line: [line],
+        )
     def add_response(log, response):
         if type(response) is types.GeneratorType:
             return log.stream(response)
         elif type(response) is types.AsyncGeneratorType:
             return log.astream(response)
         else:
-            return log.add(response)
+            return log.complete(response)
 
     def create(*params, **kwparams):
         with create_log(*params, **kwparams) as log:
             response = __create(*params, **kwparams)
             return add_response(log, response)
     async def acreate(*params, **kwparams):
-        with create_log(*params, **kwparams) as log:
+        async with create_log(*params, **kwparams) as log:
             response = await __acreate(*params, **kwparams)
             return add_response(log, response)
 

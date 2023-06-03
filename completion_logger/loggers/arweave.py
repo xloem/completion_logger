@@ -109,7 +109,7 @@ class Arweave(Logger):
     @classmethod 
     def __send(cls, ditem):
         # send a dataitem to the bundlr node
-        result = bundlr_node.send_tx(ditem.tobytes())
+        result = cls.bundlr_node.send_tx(ditem.tobytes())
         assert result['id'] == ditem.header.id
 
     # could use function caching approach if moved fetching and indexing parts to functions
