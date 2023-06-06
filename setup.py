@@ -29,6 +29,8 @@ setup(
     name='completion_logger',
     packages=[
         'completion_logger',
+        'completion_logger.loggers',
+        'completion_logger.wrappers',
     ],
     install_requires=[
         'pyarweave @ git+https://github.com/xloem/pyarweave',
