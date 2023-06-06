@@ -27,7 +27,7 @@ def wrap(cls, input_keys):
             metadata,
             processor=openai.openai_object.OpenAIObject.to_dict_recursive,
             stream_constructor=list,
-            stream_processor=lambda line: [line],
+            stream_processor=lambda line: [line.to_dict_recursive()],
         )
     def add_response(log, response):
         if type(response) is types.GeneratorType:
